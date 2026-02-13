@@ -97,16 +97,18 @@ def computeRegionResponses(brain, region_masks):
     return np.vstack(region_responses)
 
 
-def getCmat(response_filepaths, include_inds, name_list):
+def getCmat(response_filepaths, include_inds, name_list, cutoff=0.01, fs=1.2):
     """Compute fxnal corrmat from response files.
 
     :response_filepaths: list of filepaths where responses live as .pkl files
     :include_inds: list of ROI number IDs to select
     :name_list: associated list of ROI names
+    :cutoff: highpass cutoff (Hz)
+    :fs: sampling frequency (Hz)
     """
     cmats_z = []
     for resp_fp in response_filepaths:
-        tmp = getProcessedRegionResponse(resp_fp, cutoff=0.01, fs=1.2)
+        tmp = getProcessedRegionResponse(resp_fp, cutoff=cutoff, fs=fs)
         resp_included = tmp.reindex(include_inds).to_numpy()
 
         correlation_matrix = np.corrcoef(resp_included)
@@ -118,6 +120,7 @@ def getCmat(response_filepaths, include_inds, name_list):
 
     # Make mean pd Dataframe
     mean_cmat = np.nanmean(np.stack(cmats_z, axis=2), axis=2)
+    mean_cmat = np.tanh(mean_cmat)
     np.fill_diagonal(mean_cmat, np.nan)
     CorrelationMatrix = pd.DataFrame(data=mean_cmat, index=name_list, columns=name_list)
 

@@ -19,7 +19,7 @@ import matplotlib.colors
 
 from scipy.spatial.distance import pdist
 from seriate import seriate
-
+from scipy.cluster.hierarchy import linkage, optimal_leaf_ordering, leaves_list
 
 from scfc import bridge, anatomical_connectivity, functional_connectivity, plotting
 import matplotlib
@@ -152,23 +152,29 @@ fig2_2.savefig(os.path.join(analysis_dir, 'figpanels', 'fig2_2.svg'), format='sv
 # %%
 # Plot heatmaps, ordered by TSP seriation
 Structural_Matrix = anatomical_connectivity.getAtlasConnectivity(include_inds_ito, name_list_ito, 'ito')
-np.fill_diagonal(Structural_Matrix.to_numpy(), 0)
+np.fill_diagonal(Structural_Matrix.to_numpy().copy(), 0)
 
 response_filepaths = glob.glob(os.path.join(data_dir, 'ito_responses') + '/' + '*.pkl')
 Functional_Matrix, cmats_z = functional_connectivity.getCmat(response_filepaths, include_inds_ito, name_list_ito)
-Fxn_tmp = Functional_Matrix.to_numpy().copy()
-np.fill_diagonal(Fxn_tmp, 1)
+np.fill_diagonal(Functional_Matrix.to_numpy().copy(), 1)
 
-sort_inds = seriate(pdist(Structural_Matrix))
+#1. Compute Seriation Indices using SciPy (The fix for the ortools error)
+dist_matrix = pdist(Structural_Matrix)
+Z = linkage(dist_matrix, method='ward')
+optimal_Z = optimal_leaf_ordering(Z, dist_matrix)
+sort_inds = leaves_list(optimal_Z)
+
+# 2. Map indices to names
 sort_keys = np.array(name_list_ito)[sort_inds]
-np.fill_diagonal(Structural_Matrix.to_numpy(), np.nan)
 
-SC_ordered = pd.DataFrame(data=np.zeros_like(Structural_Matrix), columns=sort_keys, index=sort_keys)
-FC_ordered = pd.DataFrame(data=np.zeros_like(Functional_Matrix), columns=sort_keys, index=sort_keys)
-for r_ind, r_key in enumerate(sort_keys):
-    for c_ind, c_key in enumerate(sort_keys):
-        SC_ordered.iloc[r_ind, c_ind]=Structural_Matrix.loc[[r_key], [c_key]].to_numpy()
-        FC_ordered.iloc[r_ind, c_ind]=Functional_Matrix.loc[[r_key], [c_key]].to_numpy()
+# 3. Optimize Matrix Reordering (Vectorized approach)
+# Instead of loops, we reorder the entire axes at once using .loc with the list of keys
+SC_ordered = Structural_Matrix.loc[sort_keys, sort_keys].copy()
+FC_ordered = Functional_Matrix.loc[sort_keys, sort_keys].copy()
+
+# 4. Handle the Diagonal (Optional: setting to NaN as in your original snippet)
+np.fill_diagonal(SC_ordered.to_numpy().copy(), np.nan)
+np.fill_diagonal(FC_ordered.to_numpy().copy(), np.nan)
 
 fig2_3, ax = plt.subplots(1, 2, figsize=(9, 4))
 # fxnal heatmap
@@ -308,19 +314,27 @@ Branson_JRC2018 = anatomical_connectivity.getAtlasConnectivity(include_inds_bran
 CorrelationMatrix_branson.to_csv(os.path.join(data_dir, 'CorrelationMatrix_branson.csv'))
 Branson_JRC2018.to_csv(os.path.join(data_dir, 'StructuralMatrix_branson.csv'))
 
-# Do TSP seriation ordering
-sort_inds = seriate(pdist(Branson_JRC2018))
+# 1. New Seriation Algorithm (Optimal Leaf Ordering)
+dist_matrix = pdist(Branson_JRC2018)
+Z = linkage(dist_matrix, method='ward')
+optimal_Z = optimal_leaf_ordering(Z, dist_matrix)
+sort_inds = leaves_list(optimal_Z)
+
+# 2. Get the sorted names using the new indices
 sorted_branson_names = np.array(name_list_branson)[sort_inds]
-np.fill_diagonal(Branson_JRC2018.to_numpy(), np.nan)
 
-Branson_SC_ordered = pd.DataFrame(data=np.zeros_like(Branson_JRC2018), columns=sorted_branson_names, index=sorted_branson_names)
-Branson_FC_ordered = pd.DataFrame(data=np.zeros_like(CorrelationMatrix_branson), columns=sorted_branson_names, index=sorted_branson_names)
-for r_ind, r_key in enumerate(sorted_branson_names):
-    for c_ind, c_key in enumerate(sorted_branson_names):
-        Branson_SC_ordered.iloc[r_ind, c_ind]=Branson_JRC2018.iloc[sort_inds[r_ind], sort_inds[c_ind]]
-        Branson_FC_ordered.iloc[r_ind, c_ind]=CorrelationMatrix_branson.iloc[sort_inds[r_ind], sort_inds[c_ind]]
+# 3. Vectorized Reordering (Replacing the nested loops)
+# Using .iloc with the integer indices is the most efficient way to reorder
+Branson_SC_ordered = Branson_JRC2018.iloc[sort_inds, sort_inds].copy()
+Branson_FC_ordered = CorrelationMatrix_branson.iloc[sort_inds, sort_inds].copy()
 
+# 4. Safely Fill Diagonals with NaN (Avoiding the read-only error)
+# This creates a boolean mask for the diagonal
+diag_mask = np.eye(len(Branson_SC_ordered), dtype=bool)
 
+# We use .where to set the diagonal to NaN without modifying the underlying array's read/write status directly
+Branson_SC_ordered = Branson_SC_ordered.mask(diag_mask, np.nan)
+Branson_FC_ordered = Branson_FC_ordered.mask(diag_mask, np.nan)
 # %%
 names, inds_unique = np.unique(sorted_branson_names, return_index=True)
 inds_unique = np.append(inds_unique, len(sorted_branson_names))
@@ -354,7 +368,7 @@ cb = g_fxn.fig.colorbar(matplotlib.cm.ScalarMappable(norm=matplotlib.colors.Norm
 # %%
 # Structural conn
 tmp = Branson_SC_ordered.to_numpy()
-np.fill_diagonal(tmp, np.nan)
+#np.fill_diagonal(tmp, np.nan)
 conn_mat = pd.DataFrame(data=tmp, index=name_list_branson, columns=name_list_branson)
 g_struct = sns.clustermap(np.log10(conn_mat).replace([np.inf, -np.inf], 0), cmap='cividis',
                           cbar_kws={},
@@ -671,7 +685,7 @@ Structural_Matrix = (Structural_Matrix + Structural_Matrix.T) / 2 # symmetrize
 
 # start client
 token = bridge.getUserConfiguration()['token']
-neuprint_client = Client('neuprint.janelia.org', dataset='hemibrain:v1.2', token=token)
+neuprint_client = Client('neuprint.janelia.org', dataset='hemibrain:v1.2.1', token=token)
 
 # Atlas roi completeness measures
 roi_completeness = anatomical_connectivity.getRoiCompleteness(neuprint_client, name_list_ito)
@@ -725,6 +739,37 @@ functional_adjacency = Functional_Matrix.to_numpy()[np.triu_indices(len(name_lis
 
 r, p = pearsonr(anatomical_adjacency, functional_adjacency)
 print(r)
+
+# %% Coupling alignment matrix
+# J * J.T / N
+J = Branson_SC_ordered.fillna(0).to_numpy()
+N = J.shape[0]
+Coupling = (J @ J.T) / N
+Coupling_df = pd.DataFrame(data=Coupling, index=Branson_SC_ordered.index, columns=Branson_SC_ordered.columns)
+
+g_coupling = sns.clustermap(np.log10(Coupling_df).replace([np.inf, -np.inf], 0), cmap='cividis',
+                          cbar_kws={},
+                          rasterized=True,
+                          row_cluster=False, col_cluster=False,
+                          row_colors=atlas_colors, col_colors=atlas_colors,
+                          linewidths=0, xticklabels=False, yticklabels=False,
+                          figsize=(4, 4),
+                          cbar_pos=(0, 0, 0.0, 0.0))
+g_coupling.cax.set_visible(False)
+
+# Add labels
+for l_ind, label in enumerate(names):
+    loc = (inds_unique[l_ind] + inds_unique[l_ind+1]) / 2
+    g_coupling.ax_heatmap.annotate(bridge.displayName(label), xy=(loc, 0), rotation=90, fontsize=4, color=cmap[l_ind], fontweight='bold')
+    g_coupling.ax_heatmap.annotate(bridge.displayName(label), xy=(0, loc), rotation=0, fontsize=4, color=cmap[l_ind], fontweight='bold', ha='right')
+
+# Add colorbar
+position = g_coupling.fig.add_axes([1.0, 0.1, 0.025, 0.6])
+cb = g_coupling.fig.colorbar(matplotlib.cm.ScalarMappable(norm=matplotlib.colors.SymLogNorm(vmin=1, vmax=np.nanmax(Coupling), base=10, linthresh=0.1, linscale=1), cmap="cividis"),
+                           ax=g_coupling.ax_row_dendrogram, label='Coupling Alignment',
+                           cax=position)
+
+g_coupling.savefig(os.path.join(analysis_dir, 'figpanels', 'figS2_9.svg'), format='svg', transparent=True, dpi=save_dpi)
 # %%
 remove_regions = ['MB_CA_R', 'MB_ML_R', 'MB_ML_L', 'MB_PED_R', 'MB_VL_R', 'AL_R', 'LH_R', 'FB', 'EB', 'PB', 'NO']
 include_inds_ito, name_list_ito = bridge.getItoNames()
