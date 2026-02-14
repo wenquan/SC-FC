@@ -21,7 +21,7 @@ from scipy.spatial.distance import pdist
 from seriate import seriate
 from scipy.cluster.hierarchy import linkage, optimal_leaf_ordering, leaves_list
 
-from scfc import bridge, anatomical_connectivity, functional_connectivity, plotting
+from scfc import bridge, anatomical_connectivity, functional_connectivity, plotting, subsampling
 import matplotlib
 from matplotlib import rcParams
 rcParams.update({'font.size': 12})
@@ -744,7 +744,8 @@ print(r)
 # J * J.T / N
 J = Branson_SC_ordered.fillna(0).to_numpy()
 N = J.shape[0]
-Coupling = (J @ J.T) / N
+Coupling = (J @ J.T)
+Coupling = Coupling / np.trace(Coupling) * N
 Coupling_df = pd.DataFrame(data=Coupling, index=Branson_SC_ordered.index, columns=Branson_SC_ordered.columns)
 
 g_coupling = sns.clustermap(np.log10(Coupling_df).replace([np.inf, -np.inf], 0), cmap='cividis',
@@ -770,6 +771,42 @@ cb = g_coupling.fig.colorbar(matplotlib.cm.ScalarMappable(norm=matplotlib.colors
                            cax=position)
 
 g_coupling.savefig(os.path.join(analysis_dir, 'figpanels', 'figS2_9.svg'), format='svg', transparent=True, dpi=save_dpi)
+
+# %% Eigenvalue spectrum
+evals = np.linalg.eigvalsh(Coupling)
+evals = np.sort(evals)[::-1]
+ranks = (np.arange(len(evals)) + 1) / len(evals)
+
+figS2_10, ax = plt.subplots(1, 1, figsize=(2.5, 2.5))
+ax.loglog(ranks, evals, 'k-', linewidth=1.5)
+ax.set_xlabel('Rank (r/N)')
+ax.set_ylabel('Eigenvalue')
+ax.set_ylim([10**-4, 10**1])
+figS2_10.savefig(os.path.join(analysis_dir, 'figpanels', 'figS2_10.svg'), format='svg', transparent=True, dpi=save_dpi)
+
+# %% Subsampled Eigenspectrum
+k_fractions = [0.125, 0.25, 0.5]
+n_iter = 50
+
+figS2_11, ax = plt.subplots(1, 1, figsize=(2.5, 2.5))
+ranks_orig = (np.arange(len(evals)) + 1) / len(evals)
+ax.loglog(ranks_orig, evals, 'k-', linewidth=1.5, alpha=1.0, label='Original')
+
+colors = plt.cm.viridis(np.linspace(0, 0.8, len(k_fractions)))
+
+for i, k_fraction in enumerate(k_fractions):
+    mean_evals, std_evals, _ = subsampling.get_subsampled_eigenspectrum(Coupling, k_fraction, n_iter)
+    ranks_sub = (np.arange(len(mean_evals)) + 1) / len(mean_evals)
+    ax.loglog(ranks_sub, mean_evals, color=colors[i], linewidth=1.5, label='k={}'.format(k_fraction))
+    ax.fill_between(ranks_sub, mean_evals - std_evals, mean_evals + std_evals, color=colors[i], alpha=0.2)
+
+ax.set_xlabel('Rank (r/N)')
+ax.set_ylabel('Eigenvalue')
+ax.set_ylim([10**-4, 10**1])
+ax.legend(fontsize=6)
+ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+figS2_11.savefig(os.path.join(analysis_dir, 'figpanels', 'figS2_11.svg'), format='svg', transparent=True, dpi=save_dpi)
+
 # %%
 remove_regions = ['MB_CA_R', 'MB_ML_R', 'MB_ML_L', 'MB_PED_R', 'MB_VL_R', 'AL_R', 'LH_R', 'FB', 'EB', 'PB', 'NO']
 include_inds_ito, name_list_ito = bridge.getItoNames()
