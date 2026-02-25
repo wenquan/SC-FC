@@ -1,6 +1,6 @@
 import numpy as np
 
-def get_subsampled_eigenspectrum(Coupling, k_fraction, n_iter=100):
+def get_subsampled_eigenspectrum(Coupling, k_fraction, n_iter=100, seed=None):
     """
     Performs random subsampling of the coupling matrix.
     
@@ -16,12 +16,13 @@ def get_subsampled_eigenspectrum(Coupling, k_fraction, n_iter=100):
     """
     N = Coupling.shape[0]
     K = int(np.round(N * k_fraction))
-    
+    rng = np.random.default_rng(seed)
+
     all_evals = []
-    
+
     for i in range(n_iter):
         # Randomly choose K indices
-        inds = np.random.choice(N, K, replace=False)
+        inds = rng.choice(N, K, replace=False)
         
         # Subsample Coupling
         Coupling_sub = Coupling[np.ix_(inds, inds)]
@@ -117,7 +118,7 @@ def fit_power_law_eigenvalues(eigenvalues, num_top_eigenvalues=10):
         "fitted_y": fitted_y
     }
 
-def generate_W_matrix(Coupling, g):
+def generate_W_matrix(Coupling, g, seed=None):
     """
     Generates a new W matrix as W = rho * U, where rho has eigenvalues 
     that are square root of the coupling alignment matrix.
@@ -139,9 +140,10 @@ def generate_W_matrix(Coupling, g):
     rho = evecs @ np.diag(np.sqrt(np.maximum(evals, 0))) @ evecs.T
     
     N = Coupling.shape[0]
-    # U is a random gaussian matrix with the same dimension as the coupling, 
+    rng = np.random.default_rng(seed)
+    # U is a random gaussian matrix with the same dimension as the coupling,
     # and the variance of its entries is given by g^2/N
-    U = np.random.normal(0, g / np.sqrt(N), (N, N))
+    U = rng.normal(0, g / np.sqrt(N), (N, N))
     
     # Calculate W
     W = rho @ U
