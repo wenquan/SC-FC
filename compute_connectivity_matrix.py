@@ -18,7 +18,7 @@ analysis_dir = bridge.getUserConfiguration()['analysis_dir']
 token = bridge.getUserConfiguration()['token']
 
 # start client
-neuprint_client = Client('neuprint.janelia.org', dataset='hemibrain:v1.2', token=token)
+neuprint_client = Client('neuprint.janelia.org', dataset='hemibrain:v1.2.1', token=token)
 
 # get rois of interest
 mapping = bridge.getRoiMapping()
